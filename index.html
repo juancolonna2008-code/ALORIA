@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Aloria Cuentas</title>
+<link rel="icon" type="image/png" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#46543a">
+<meta name="apple-mobile-web-app-title" content="Aloria">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Jost:wght@400;500;600&display=swap">
 <style>
 /* Layout: una columna ancha con cabecera de periodo, resultado neto como protagonista y tres pestañas de trabajo. */
@@ -112,6 +119,9 @@ td input{width:110px;text-align:right;padding:6px 8px}
 .pill{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;border:1px solid currentColor;border-radius:99px;padding:2px 9px;text-align:center;justify-self:start}
 .pill.venta{color:var(--gain)} .pill.regalo{color:var(--loss)} .pill.compra,.pill.gasto{color:var(--muted)}
 .mv .a{font-weight:600;text-align:right}
+.acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.owed{display:flex;gap:10px 18px;flex-wrap:wrap;align-items:center;padding:12px 16px;border:1px dashed var(--loss);border-radius:8px;font-size:.95rem}
+.owed b{font-weight:600}
 .empty{padding:28px 0;color:var(--muted)}
 .filters{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
 .filters button{border:1px solid var(--line);background:none;border-radius:99px;padding:4px 12px;cursor:pointer;font-size:.84rem;color:var(--muted)}
@@ -122,7 +132,7 @@ td input{width:110px;text-align:right;padding:6px 8px}
   .mv{grid-template-columns:minmax(0,1fr) auto auto;row-gap:4px}
   .mv .t{grid-column:1;grid-row:1}
   .mv .a{grid-column:2;grid-row:1}
-  .mv>button{grid-column:3;grid-row:1}
+  .mv>.acts{grid-column:3;grid-row:1}
   .mv .d{grid-column:1;grid-row:2}
   .mv .pill{grid-column:2 / 4;grid-row:2;justify-self:end}
   .cash b{font-size:1.05rem}
@@ -173,6 +183,7 @@ td input{width:110px;text-align:right;padding:6px 8px}
       <div class="flow num" id="flow"></div>
     </div>
     <div class="cash num" id="cash"></div>
+    <div class="owed" id="owed" hidden></div>
     <div>
       <div class="sec"><h2>Por producto</h2><span>Stock calculado con todas las compras, ventas y regalos</span></div>
       <div class="tablebox"><table id="byprod"></table></div>
@@ -198,6 +209,7 @@ td input{width:110px;text-align:right;padding:6px 8px}
         <span id="total" class="num"></span>
       </div>
       <label class="fld">Nota (cliente, motivo, concepto)<input type="text" id="f-note" maxlength="120" placeholder="Ej: María, feria del sábado"></label>
+      <label class="chk" id="w-pend"><input type="checkbox" id="f-pend"> <span id="l-pend">Pendiente de cobro (todavía no me pagó)</span></label>
       <label class="chk" id="w-upd" hidden><input type="checkbox" id="f-upd" checked> Usar este precio como nuevo costo del producto</label>
       <div class="hint" id="hint"></div>
       <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
@@ -394,7 +406,8 @@ td input{width:110px;text-align:right;padding:6px 8px}
   function inPeriod(m){return state.period==="all"||(m.date||"").slice(0,7)===state.period}
   function calc(){
     var mv=data.moves.filter(inPeriod);
-    var r={ventas:0,cmv:0,regalos:0,compras:0,gastos:0,n:mv.length,by:{}};
+    var r={ventas:0,cmv:0,regalos:0,compras:0,gastos:0,n:mv.length,by:{},pendIn:0,pendOut:0};
+    mv.forEach(function(m){if(isPend(m)){if(m.type==="venta")r.pendIn+=(+m.amount||0);else if(m.type!=="regalo")r.pendOut+=(+m.amount||0)}});
     function row(m){var k=m.pid||"x";return r.by[k]||(r.by[k]={name:m.pname||"Producto",sold:0,rev:0,cost:0,gift:0,giftCost:0})}
     mv.forEach(function(m){
       var a=+m.amount||0,q=+m.qty||0,uc=+m.unitCost||0;
@@ -404,8 +417,22 @@ td input{width:110px;text-align:right;padding:6px 8px}
       else if(m.type==="gasto")r.gastos+=a;
     });
     r.bruta=r.ventas-r.cmv;r.neto=r.bruta-r.regalos-r.gastos;
-    r.entra=r.ventas;r.sale=r.compras+r.gastos;
+    // Caja: solo lo que realmente se cobró o se pagó.
+    r.entra=r.ventas-r.pendIn;r.sale=r.compras+r.gastos-r.pendOut;
     return r;
+  }
+  function isPend(m){return m.status==="pendiente"}
+  // El estado solo viaja cuando hay algo pendiente: un movimiento pago no lleva el campo.
+  function withStatus(o,s){if(s)o.status=s;return o}
+  // Deudas abiertas de todo el historial, sin importar el periodo elegido.
+  function owedAll(){
+    var o={inn:0,out:0,nIn:{},nOut:{}};
+    data.moves.forEach(function(m){
+      if(!isPend(m))return;var a=+m.amount||0,k=m.gid||m.id;
+      if(m.type==="venta"){o.inn+=a;o.nIn[k]=1}else if(m.type!=="regalo"){o.out+=a;o.nOut[k]=1}
+    });
+    o.nIn=Object.keys(o.nIn).length;o.nOut=Object.keys(o.nOut).length;
+    return o;
   }
   function stockOf(p){
     var s=+p.stock0||0;
@@ -440,9 +467,14 @@ td input{width:110px;text-align:right;padding:6px 8px}
       '<div class="last"><span>Resultado neto</span><span class="'+(r.neto>0?"pos":r.neto<0?"neg":"")+'">'+money(r.neto)+'</span></div>';
     var saldo=r.entra-r.sale;
     $("cash").innerHTML=
-      '<div><small>Entró</small><b class="pos">'+money(r.entra)+'</b></div>'+
-      '<div><small>Salió (compras y gastos)</small><b>'+money(-r.sale)+'</b></div>'+
+      '<div><small>Entró (cobrado)</small><b class="pos">'+money(r.entra)+'</b></div>'+
+      '<div><small>Salió (pagado)</small><b>'+money(-r.sale)+'</b></div>'+
       '<div><small>Saldo de caja</small><b class="'+(saldo<0?"neg":"")+'">'+money(saldo)+'</b></div>';
+    var o=owedAll(),ow=$("owed");
+    ow.hidden=!(o.inn||o.out);
+    ow.innerHTML=(o.inn?'<span>Te deben <b class="neg num">'+money(o.inn)+'</b> ('+o.nIn+(o.nIn===1?" venta":" ventas")+')</span>':'')+
+      (o.out?'<span>Debés <b class="neg num">'+money(o.out)+'</b> ('+o.nOut+(o.nOut===1?" compra o gasto":" compras o gastos")+')</span>':'')+
+      '<button class="btn ghost small" type="button" data-showpend="1">Ver pendientes</button>';
 
     var miss=sortedProducts().filter(function(p){return !(+p.cost>0)&&r.by[p.id]&&(r.by[p.id].sold||r.by[p.id].gift)});
     var w=$("warn");
@@ -452,6 +484,11 @@ td input{width:110px;text-align:right;padding:6px 8px}
     var rows=sortedProducts().map(function(p){
       var b=r.by[p.id]||{sold:0,rev:0,cost:0,gift:0,giftCost:0},st=stockOf(p),g=b.rev-b.cost;
       return '<tr><td>'+esc(prodLabel(p))+'</td><td class="num">'+b.sold+'</td><td class="num">'+money(b.rev)+'</td><td class="num '+(g<0?"neg":"")+'">'+money(g)+'</td><td class="num">'+b.gift+'</td><td class="num '+(b.giftCost?"neg":"")+'">'+(b.giftCost?money(-b.giftCost):"$0")+'</td><td class="num '+(st<=0?"neg":"")+'">'+st+'</td></tr>';
+    }).join("");
+    // Productos que ya no se venden pero tienen movimientos en el periodo: se muestran sin stock.
+    rows+=Object.keys(r.by).filter(function(k){return !prodById(k)}).map(function(k){
+      var b=r.by[k],g=b.rev-b.cost;
+      return '<tr><td>'+esc(b.name)+' <small style="color:var(--muted)">(ya no se vende)</small></td><td class="num">'+b.sold+'</td><td class="num">'+money(b.rev)+'</td><td class="num '+(g<0?"neg":"")+'">'+money(g)+'</td><td class="num">'+b.gift+'</td><td class="num '+(b.giftCost?"neg":"")+'">'+(b.giftCost?money(-b.giftCost):"$0")+'</td><td class="num">–</td></tr>';
     }).join("");
     $("byprod").innerHTML='<thead><tr><th>Producto</th><th>Vendidos</th><th>Ventas</th><th>Ganancia</th><th>Regalados</th><th>Pérdida</th><th>Stock</th></tr></thead><tbody>'+
       (rows||'<tr><td colspan="7" class="empty">Agregá tus productos en la pestaña Productos.</td></tr>')+'</tbody>';
@@ -464,29 +501,34 @@ td input{width:110px;text-align:right;padding:6px 8px}
     if(sig!==prodSig){prodSig=sig;renderLines()}else refreshLines();
   }
   function renderList(){
-    var fl=[["todos","Todos"],["venta","Ventas"],["regalo","Regalos"],["compra","Compras"],["gasto","Gastos"]];
+    var fl=[["todos","Todos"],["venta","Ventas"],["regalo","Regalos"],["compra","Compras"],["gasto","Gastos"],["pend","Pendientes de pago"]];
     $("filters").innerHTML=fl.map(function(f){return '<button type="button" data-filter="'+f[0]+'" aria-pressed="'+(state.filter===f[0])+'">'+f[1]+'</button>'}).join("");
-    var groups={},order=[],pend=pendingIds();
-    data.moves.filter(inPeriod).filter(function(m){return state.filter==="todos"||m.type===state.filter}).forEach(function(m){
+    var groups={},order=[],pend=pendingIds(),onlyPend=state.filter==="pend";
+    // "Pendientes" muestra todo el historial: una deuda vieja sigue abierta aunque sea de otro mes.
+    data.moves.filter(function(m){return onlyPend?isPend(m):inPeriod(m)}).filter(function(m){return state.filter==="todos"||onlyPend||m.type===state.filter}).forEach(function(m){
       var k=m.gid||m.id;
       if(!groups[k]){groups[k]={key:k,date:m.date||"",type:m.type,note:m.note||"",items:[],total:0,id:m.id};order.push(k)}
       groups[k].items.push(m);groups[k].total+=(+m.amount||0);
     });
     var gs=order.map(function(k){return groups[k]}).sort(function(a,b){return b.date.localeCompare(a.date)||(b.id>a.id?1:-1)});
     $("movCount").textContent=gs.length+(gs.length===1?" movimiento":" movimientos");
-    if(!gs.length){$("list").innerHTML='<div class="empty">Sin movimientos en este periodo. Cargá el primero arriba.</div>';return}
+    if(!gs.length){$("list").innerHTML='<div class="empty">'+(onlyPend?"No tenés nada pendiente de cobro ni de pago.":"Sin movimientos en este periodo. Cargá el primero arriba.")+'</div>';return}
     $("list").innerHTML=gs.map(function(g){
       var pos=g.type==="venta";
       var title=g.type==="gasto"?esc(g.note||"Gasto"):g.items.map(function(m){return esc(m.pname||"Producto")+" × "+(+m.qty||0)}).join(", ");
       var sub=g.type==="gasto"?"":esc(g.note);
       if(g.type==="regalo")sub=(sub?sub+" · ":"")+"pérdida a costo";
+      var owe=g.items.some(isPend);
+      if(owe)sub=(sub?sub+" · ":"")+'<span class="pend">'+(pos?"pendiente de cobro":"pendiente de pago")+'</span>';
       if(g.items.some(function(m){return pend[m.id]}))sub=(sub?sub+" · ":"")+'<span class="pend">sin guardar en la planilla</span>';
       var d=g.date.split("-").reverse().slice(0,2).join("/");
+      if(onlyPend)d=d+"/"+g.date.slice(2,4);
       var confirm=state.pendingDel===g.key;
       return '<div class="mv"><span class="d num">'+d+'</span><span class="pill '+g.type+'">'+TYPES[g.type]+'</span>'+
         '<span class="t">'+title+(sub?'<small>'+sub+'</small>':'')+'</span>'+
         '<span class="a num '+(pos?"pos":g.type==="regalo"?"neg":"")+'">'+(pos?"+":"−")+money(g.total).replace("−","")+'</span>'+
-        '<button class="btn ghost small" type="button" data-del="'+esc(g.key)+'">'+(confirm?"¿Seguro?":"Borrar")+'</button></div>';
+        '<span class="acts">'+(owe?'<button class="btn small" type="button" data-pay="'+esc(g.key)+'">'+(pos?"Ya me pagó":"Ya pagué")+'</button>':'')+
+        '<button class="btn ghost small" type="button" data-del="'+esc(g.key)+'">'+(confirm?"¿Seguro?":"Borrar")+'</button></span></div>';
     }).join("");
   }
   function renderProducts(){
@@ -497,10 +539,11 @@ td input{width:110px;text-align:right;padding:6px 8px}
         '<td><input type="number" min="0" step="any" value="'+(+p.cost||0)+'" data-pf="cost" data-id="'+esc(p.id)+'" aria-label="Costo de '+esc(prodLabel(p))+'"></td>'+
         '<td class="num">'+m+'</td>'+
         '<td><input type="number" step="1" value="'+(+p.stock0||0)+'" data-pf="stock0" data-id="'+esc(p.id)+'" aria-label="Stock inicial de '+esc(prodLabel(p))+'"></td>'+
-        '<td class="num">'+stockOf(p)+'</td></tr>';
+        '<td class="num">'+stockOf(p)+'</td>'+
+        '<td><button class="btn ghost small" type="button" data-delprod="'+esc(p.id)+'">'+(state.pendingDelProd===p.id?"¿Seguro?":"Quitar")+'</button></td></tr>';
     }).join("");
-    $("prodTable").innerHTML='<thead><tr><th>Producto</th><th>Precio de venta</th><th>Costo por unidad</th><th>Margen</th><th>Stock inicial</th><th>Stock hoy</th></tr></thead><tbody>'+
-      (rows||'<tr><td colspan="6" class="empty">Todavía no hay productos. Agregá el primero abajo.</td></tr>')+'</tbody>';
+    $("prodTable").innerHTML='<thead><tr><th>Producto</th><th>Precio de venta</th><th>Costo por unidad</th><th>Margen</th><th>Stock inicial</th><th>Stock hoy</th><th></th></tr></thead><tbody>'+
+      (rows||'<tr><td colspan="7" class="empty">Todavía no hay productos. Agregá el primero abajo.</td></tr>')+'</tbody>';
   }
   function render(){
     renderPeriod();syncLines();renderResumen();renderList();renderProducts();
@@ -547,6 +590,8 @@ td input{width:110px;text-align:right;padding:6px 8px}
     Array.prototype.forEach.call($("typeSeg").children,function(x){x.setAttribute("aria-pressed",String(x.dataset.type===t))});
     var g=t==="gasto";
     $("lines").hidden=g;$("w-add").hidden=g;$("w-gasto").hidden=!g;$("w-upd").hidden=t!=="compra";
+    $("w-pend").hidden=t==="regalo";
+    $("l-pend").textContent=t==="venta"?"Pendiente de cobro (todavía no me pagó)":"Pendiente de pago (todavía no lo pagué)";
     $("addLine").textContent=t==="venta"?"+ Agregar otro producto a esta venta":"+ Agregar otro producto";
     renderLines();
   }
@@ -575,11 +620,11 @@ td input{width:110px;text-align:right;padding:6px 8px}
   $("form").addEventListener("submit",function(e){
     e.preventDefault();
     var t=state.type,date=$("f-date").value||today(),note=$("f-note").value.trim(),err=$("err");err.textContent="";
-    var jobs=[];
+    var jobs=[],status=(t!=="regalo"&&$("f-pend").checked)?"pendiente":"";
     if(t==="gasto"){
       var a=+$("f-amount").value||0;
       if(a<=0){err.textContent="Poné un monto mayor a cero.";return}
-      jobs.push(put("moves",newId("m"),{type:t,date:date,amount:a,note:note}));
+      jobs.push(put("moves",newId("m"),withStatus({type:t,date:date,amount:a,note:note},status)));
     }else{
       var gid=newId("g"),out=[];
       for(var i=0;i<state.lines.length;i++){
@@ -590,7 +635,7 @@ td input{width:110px;text-align:right;padding:6px 8px}
         out.push({p:p,q:q,a:a2});
       }
       out.forEach(function(x){
-        jobs.push(put("moves",newId("m"),{type:t,date:date,amount:x.a,note:note,gid:gid,pid:x.p.id,pname:prodLabel(x.p),qty:x.q,unitCost:+x.p.cost||0}));
+        jobs.push(put("moves",newId("m"),withStatus({type:t,date:date,amount:x.a,note:note,gid:gid,pid:x.p.id,pname:prodLabel(x.p),qty:x.q,unitCost:+x.p.cost||0},status)));
         if(t==="compra"&&$("f-upd").checked)jobs.push(patch("products",x.p.id,{cost:Math.round(x.a/x.q*100)/100}));
       });
     }
@@ -599,7 +644,7 @@ td input{width:110px;text-align:right;padding:6px 8px}
     Promise.all(jobs).then(function(ids){
       lastSubmit=ids;
       var m=$("saveMsg");m.className="hint";m.textContent=ready()?"Enviando a Google Sheets…":"Registrado solo en este dispositivo. Falta conectar con Google Sheets.";
-      $("f-note").value="";$("f-amount").value="";
+      $("f-note").value="";$("f-amount").value="";$("f-pend").checked=false;
       var ym=date.slice(0,7);if(state.period!=="all"&&state.period!==ym)state.period=ym;
       state.lines=[{pid:state.lines[0].pid,qty:1,amount:"",touched:false}];
       renderLines();render();
@@ -614,6 +659,14 @@ td input{width:110px;text-align:right;padding:6px 8px}
   document.addEventListener("click",function(e){
     var g=e.target.closest("[data-goto]");if(g){goto(g.dataset.goto);return}
     var f=e.target.closest("[data-filter]");if(f){state.filter=f.dataset.filter;renderList();return}
+    var sp=e.target.closest("[data-showpend]");if(sp){state.filter="pend";goto("movs");renderList();$("list").scrollIntoView({behavior:"smooth",block:"start"});return}
+    var py=e.target.closest("[data-pay]");
+    if(py){var gk=py.dataset.pay;py.disabled=true;data.moves.filter(function(m){return (m.gid||m.id)===gk&&isPend(m)}).forEach(function(m){patch("moves",m.id,{status:""})});return}
+    var dp=e.target.closest("[data-delprod]");
+    if(dp){var pid=dp.dataset.delprod;
+      if(state.pendingDelProd===pid){state.pendingDelProd=null;del("products",pid)}
+      else{state.pendingDelProd=pid;renderProducts();setTimeout(function(){if(state.pendingDelProd===pid){state.pendingDelProd=null;renderProducts()}},3500)}
+      return}
     var d=e.target.closest("[data-del]");
     if(d){var id=d.dataset.del;if(state.pendingDel===id){state.pendingDel=null;data.moves.filter(function(m){return (m.gid||m.id)===id}).forEach(function(m){del("moves",m.id)})}else{state.pendingDel=id;renderList();setTimeout(function(){if(state.pendingDel===id){state.pendingDel=null;renderList()}},3500)}}
   });

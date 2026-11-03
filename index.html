@@ -75,7 +75,7 @@ nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--acce
 .flow div.sub{font-weight:600;border-bottom:2px solid var(--ink)}
 .flow div.last{font-weight:700;font-size:1.08rem;border-bottom:0}
 .flow span:first-child{min-width:0}
-.cash{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+.cash{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid var(--line);border-radius:8px;background:var(--surface)}
 .cash div{padding:14px 16px;display:flex;flex-direction:column;gap:2px}
 .cash div+div{border-left:1px solid var(--line)}
 .cash small{color:var(--muted);font-size:.74rem;letter-spacing:.08em;text-transform:uppercase}
@@ -117,7 +117,10 @@ td input{width:110px;text-align:right;padding:6px 8px}
 .mv .t{min-width:0;overflow-wrap:anywhere}
 .mv .t small{display:block;color:var(--muted)}
 .pill{font-size:.7rem;letter-spacing:.08em;text-transform:uppercase;border:1px solid currentColor;border-radius:99px;padding:2px 9px;text-align:center;justify-self:start}
-.pill.venta{color:var(--gain)} .pill.regalo{color:var(--loss)} .pill.compra,.pill.gasto{color:var(--muted)}
+.pill.venta{color:var(--gain)} .pill.regalo{color:var(--loss)} .pill.compra,.pill.gasto{color:var(--muted)} .pill.retiro{color:#8a5a2b} .pill.ajuste{color:var(--accent)}
+.match{display:flex;gap:10px 16px;flex-wrap:wrap;align-items:center;padding:12px 16px;border:1px solid var(--line);border-radius:8px;background:var(--surface);font-size:.95rem}
+.match input{width:170px}
+.match .hint{flex-basis:100%;margin:0}
 .mv .a{font-weight:600;text-align:right}
 .acts{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .owed{display:flex;gap:10px 18px;flex-wrap:wrap;align-items:center;padding:12px 16px;border:1px dashed var(--loss);border-radius:8px;font-size:.95rem}
@@ -135,6 +138,9 @@ td input{width:110px;text-align:right;padding:6px 8px}
   .mv>.acts{grid-column:3;grid-row:1}
   .mv .d{grid-column:1;grid-row:2}
   .mv .pill{grid-column:2 / 4;grid-row:2;justify-self:end}
+  .cash{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .cash div:nth-child(3){border-left:0;border-top:1px solid var(--line)}
+  .cash div:nth-child(4){border-top:1px solid var(--line)}
   .cash b{font-size:1.05rem}
   .cash div{padding:12px}
 }
@@ -184,6 +190,7 @@ td input{width:110px;text-align:right;padding:6px 8px}
     </div>
     <div class="cash num" id="cash"></div>
     <div class="owed" id="owed" hidden></div>
+    <div class="match" id="match"></div>
     <div>
       <div class="sec"><h2>Por producto</h2><span>Stock calculado con todas las compras, ventas y regalos</span></div>
       <div class="tablebox"><table id="byprod"></table></div>
@@ -198,6 +205,7 @@ td input{width:110px;text-align:right;padding:6px 8px}
         <button type="button" data-type="regalo" aria-pressed="false">Regalo</button>
         <button type="button" data-type="compra" aria-pressed="false">Compra de mercadería</button>
         <button type="button" data-type="gasto" aria-pressed="false">Otro gasto</button>
+        <button type="button" data-type="retiro" aria-pressed="false">Retiro personal</button>
       </div>
       <div class="row">
         <label class="fld">Fecha<input type="date" id="f-date"></label>
@@ -249,7 +257,7 @@ td input{width:110px;text-align:right;padding:6px 8px}
   var $ = function(id){return document.getElementById(id)};
   var data = {products:[], moves:[]};
   var state = {type:"venta", period:null, filter:"todos", pendingDel:null, lines:[{pid:"",qty:1,amount:"",touched:false}]};
-  var TYPES = {venta:"Venta", regalo:"Regalo", compra:"Compra", gasto:"Gasto"};
+  var TYPES = {venta:"Venta", regalo:"Regalo", compra:"Compra", gasto:"Gasto", retiro:"Retiro", ajuste:"Ajuste"};
 
   function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
   function money(n){n=Math.round(n||0);return (n<0?"−":"")+"$"+Math.abs(n).toLocaleString("es-AR")}
@@ -406,7 +414,7 @@ td input{width:110px;text-align:right;padding:6px 8px}
   function inPeriod(m){return state.period==="all"||(m.date||"").slice(0,7)===state.period}
   function calc(){
     var mv=data.moves.filter(inPeriod);
-    var r={ventas:0,cmv:0,regalos:0,compras:0,gastos:0,n:mv.length,by:{},pendIn:0,pendOut:0};
+    var r={ventas:0,cmv:0,regalos:0,compras:0,gastos:0,retiros:0,ajustes:0,n:mv.length,by:{},pendIn:0,pendOut:0};
     mv.forEach(function(m){if(isPend(m)){if(m.type==="venta")r.pendIn+=(+m.amount||0);else if(m.type!=="regalo")r.pendOut+=(+m.amount||0)}});
     function row(m){var k=m.pid||"x";return r.by[k]||(r.by[k]={name:m.pname||"Producto",sold:0,rev:0,cost:0,gift:0,giftCost:0})}
     mv.forEach(function(m){
@@ -415,6 +423,8 @@ td input{width:110px;text-align:right;padding:6px 8px}
       else if(m.type==="regalo"){r.regalos+=a;var g=row(m);g.gift+=q;g.giftCost+=a}
       else if(m.type==="compra")r.compras+=a;
       else if(m.type==="gasto")r.gastos+=a;
+      else if(m.type==="retiro")r.retiros+=a;   // plata que sacás para vos: baja la caja, no es gasto del negocio
+      else if(m.type==="ajuste")r.ajustes+=a;   // diferencia para emparejar la caja con la plata real (puede ser negativa)
     });
     r.bruta=r.ventas-r.cmv;r.neto=r.bruta-r.regalos-r.gastos;
     // Caja: solo lo que realmente se cobró o se pagó.
@@ -433,6 +443,30 @@ td input{width:110px;text-align:right;padding:6px 8px}
     });
     o.nIn=Object.keys(o.nIn).length;o.nOut=Object.keys(o.nOut).length;
     return o;
+  }
+  // Saldo de caja de todo el historial (lo que debería haber hoy entre efectivo y cuentas)
+  function cashAll(){
+    var s=0;
+    data.moves.forEach(function(m){
+      if(isPend(m))return;var a=+m.amount||0;
+      if(m.type==="venta"||m.type==="ajuste")s+=a;
+      else if(m.type==="compra"||m.type==="gasto"||m.type==="retiro")s-=a;
+    });
+    return s;
+  }
+  function renderMatch(){
+    var box=$("match");if(!box)return;
+    var s=cashAll(),pm=state.matchPending;
+    if(pm!=null){
+      var d=pm-s;
+      box.innerHTML='<span>Tenés <b class="num">'+money(pm)+'</b> y la app dice <b class="num">'+money(s)+'</b>. Se registra un ajuste de <b class="num">'+(d>0?"+":"")+money(d)+'</b>.</span>'+
+        '<button class="btn small" type="button" data-match="ok">Confirmar ajuste</button><button class="btn ghost small" type="button" data-match="no">Cancelar</button>';
+      return;
+    }
+    box.innerHTML='<span>Caja de todo el historial: <b class="num">'+money(s)+'</b></span>'+
+      '<label class="chk" style="gap:8px">¿Cuánto tenés hoy? <input type="number" id="matchIn" min="0" step="any" inputmode="decimal" placeholder="Ej: 1027767"></label>'+
+      '<button class="btn ghost small" type="button" data-match="ver">Emparejar caja</button>'+
+      '<p class="hint">Sumá efectivo y cuentas del negocio. La diferencia queda como un "Ajuste" y desde ahí el saldo coincide con tu plata real.</p>';
   }
   function stockOf(p){
     var s=+p.stock0||0;
@@ -465,11 +499,13 @@ td input{width:110px;text-align:right;padding:6px 8px}
       '<div><span>Regalos (pérdida a costo)</span><span class="'+(r.regalos?"neg":"")+'">'+money(-r.regalos)+'</span></div>'+
       '<div><span>Otros gastos</span><span>'+money(-r.gastos)+'</span></div>'+
       '<div class="last"><span>Resultado neto</span><span class="'+(r.neto>0?"pos":r.neto<0?"neg":"")+'">'+money(r.neto)+'</span></div>';
-    var saldo=r.entra-r.sale;
+    var saldo=r.entra-r.sale-r.retiros+r.ajustes;
     $("cash").innerHTML=
       '<div><small>Entró (cobrado)</small><b class="pos">'+money(r.entra)+'</b></div>'+
-      '<div><small>Salió (pagado)</small><b>'+money(-r.sale)+'</b></div>'+
-      '<div><small>Saldo de caja</small><b class="'+(saldo<0?"neg":"")+'">'+money(saldo)+'</b></div>';
+      '<div><small>Salió (negocio)</small><b>'+money(-r.sale)+'</b></div>'+
+      '<div><small>Retiros personales</small><b>'+money(-r.retiros)+'</b></div>'+
+      '<div><small>Saldo de caja</small><b class="'+(saldo<0?"neg":"")+'">'+money(saldo)+'</b>'+(r.ajustes?'<small style="text-transform:none;letter-spacing:0">incluye ajustes por '+money(r.ajustes)+'</small>':'')+'</div>';
+    renderMatch();
     var o=owedAll(),ow=$("owed");
     ow.hidden=!(o.inn||o.out);
     ow.innerHTML=(o.inn?'<span>Te deben <b class="neg num">'+money(o.inn)+'</b> ('+o.nIn+(o.nIn===1?" venta":" ventas")+')</span>':'')+
@@ -501,7 +537,7 @@ td input{width:110px;text-align:right;padding:6px 8px}
     if(sig!==prodSig){prodSig=sig;renderLines()}else refreshLines();
   }
   function renderList(){
-    var fl=[["todos","Todos"],["venta","Ventas"],["regalo","Regalos"],["compra","Compras"],["gasto","Gastos"],["pend","Pendientes de pago"]];
+    var fl=[["todos","Todos"],["venta","Ventas"],["regalo","Regalos"],["compra","Compras"],["gasto","Gastos"],["retiro","Retiros"],["pend","Pendientes de pago"]];
     $("filters").innerHTML=fl.map(function(f){return '<button type="button" data-filter="'+f[0]+'" aria-pressed="'+(state.filter===f[0])+'">'+f[1]+'</button>'}).join("");
     var groups={},order=[],pend=pendingIds(),onlyPend=state.filter==="pend";
     // "Pendientes" muestra todo el historial: una deuda vieja sigue abierta aunque sea de otro mes.
@@ -514,9 +550,10 @@ td input{width:110px;text-align:right;padding:6px 8px}
     $("movCount").textContent=gs.length+(gs.length===1?" movimiento":" movimientos");
     if(!gs.length){$("list").innerHTML='<div class="empty">'+(onlyPend?"No tenés nada pendiente de cobro ni de pago.":"Sin movimientos en este periodo. Cargá el primero arriba.")+'</div>';return}
     $("list").innerHTML=gs.map(function(g){
-      var pos=g.type==="venta";
-      var title=g.type==="gasto"?esc(g.note||"Gasto"):g.items.map(function(m){return esc(m.pname||"Producto")+" × "+(+m.qty||0)}).join(", ");
-      var sub=g.type==="gasto"?"":esc(g.note);
+      var sinProd={gasto:"Gasto",retiro:"Retiro personal",ajuste:"Ajuste de caja"};
+      var pos=g.type==="venta"||(g.type==="ajuste"&&g.total>=0);
+      var title=sinProd[g.type]?esc(g.note||sinProd[g.type]):g.items.map(function(m){return esc(m.pname||"Producto")+" × "+(+m.qty||0)}).join(", ");
+      var sub=sinProd[g.type]?(g.type==="retiro"?"no cuenta como gasto del negocio":""):esc(g.note);
       if(g.type==="regalo")sub=(sub?sub+" · ":"")+"pérdida a costo";
       var owe=g.items.some(isPend);
       if(owe)sub=(sub?sub+" · ":"")+'<span class="pend">'+(pos?"pendiente de cobro":"pendiente de pago")+'</span>';
@@ -581,16 +618,17 @@ td input{width:110px;text-align:right;padding:6px 8px}
     if(t==="regalo"){var nocost=state.lines.some(function(l){var p=prodById(l.pid);return p&&!(+p.cost>0)});hint=nocost?"Algún producto no tiene costo cargado, esa parte cuenta como $0 de pérdida. Cargalo en Productos.":"La pérdida se calcula con el costo de cada producto."}
     if(t==="compra")hint="Suma las cantidades al stock.";
     if(t==="gasto"){hint="Envíos, packaging, feria, combustible, publicidad.";total=+$("f-amount").value||0}
+    if(t==="retiro"){hint="Plata que sacás del negocio para vos o para gastos personales. Baja la caja pero no cuenta como gasto del negocio.";total=+$("f-amount").value||0}
     $("hint").textContent=hint;
-    $("total").textContent=t==="gasto"?"":"Total: "+money(total);
+    $("total").textContent=(t==="gasto"||t==="retiro")?"":"Total: "+money(total);
   }
   function setType(t){
     state.type=t;$("err").textContent="";
     state.lines.forEach(function(l){l.touched=false;l.amount=""});
     Array.prototype.forEach.call($("typeSeg").children,function(x){x.setAttribute("aria-pressed",String(x.dataset.type===t))});
-    var g=t==="gasto";
+    var g=t==="gasto"||t==="retiro";
     $("lines").hidden=g;$("w-add").hidden=g;$("w-gasto").hidden=!g;$("w-upd").hidden=t!=="compra";
-    $("w-pend").hidden=t==="regalo";
+    $("w-pend").hidden=t==="regalo"||t==="retiro";
     $("l-pend").textContent=t==="venta"?"Pendiente de cobro (todavía no me pagó)":"Pendiente de pago (todavía no lo pagué)";
     $("addLine").textContent=t==="venta"?"+ Agregar otro producto a esta venta":"+ Agregar otro producto";
     renderLines();
@@ -620,8 +658,8 @@ td input{width:110px;text-align:right;padding:6px 8px}
   $("form").addEventListener("submit",function(e){
     e.preventDefault();
     var t=state.type,date=$("f-date").value||today(),note=$("f-note").value.trim(),err=$("err");err.textContent="";
-    var jobs=[],status=(t!=="regalo"&&$("f-pend").checked)?"pendiente":"";
-    if(t==="gasto"){
+    var jobs=[],status=(t!=="regalo"&&t!=="retiro"&&$("f-pend").checked)?"pendiente":"";
+    if(t==="gasto"||t==="retiro"){
       var a=+$("f-amount").value||0;
       if(a<=0){err.textContent="Poné un monto mayor a cero.";return}
       jobs.push(put("moves",newId("m"),withStatus({type:t,date:date,amount:a,note:note},status)));
@@ -659,6 +697,18 @@ td input{width:110px;text-align:right;padding:6px 8px}
   document.addEventListener("click",function(e){
     var g=e.target.closest("[data-goto]");if(g){goto(g.dataset.goto);return}
     var f=e.target.closest("[data-filter]");if(f){state.filter=f.dataset.filter;renderList();return}
+    var mt=e.target.closest("[data-match]");
+    if(mt){
+      var act=mt.dataset.match;
+      if(act==="ver"){var v=$("matchIn").value;if(v===""||isNaN(+v)){$("matchIn").focus();return}state.matchPending=+v;renderMatch();return}
+      if(act==="no"){state.matchPending=null;renderMatch();return}
+      if(act==="ok"){
+        var diff=Math.round((state.matchPending-cashAll())*100)/100,real=state.matchPending;state.matchPending=null;
+        if(diff!==0)put("moves",newId("m"),{type:"ajuste",date:today(),amount:diff,note:"Ajuste para emparejar caja (había "+money(real)+")"});
+        else renderMatch();
+        return;
+      }
+    }
     var sp=e.target.closest("[data-showpend]");if(sp){state.filter="pend";goto("movs");renderList();$("list").scrollIntoView({behavior:"smooth",block:"start"});return}
     var py=e.target.closest("[data-pay]");
     if(py){var gk=py.dataset.pay;py.disabled=true;data.moves.filter(function(m){return (m.gid||m.id)===gk&&isPend(m)}).forEach(function(m){patch("moves",m.id,{status:""})});return}
